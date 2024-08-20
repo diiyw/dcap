@@ -60,12 +60,7 @@ func NewDCap() (*DCap, error) {
 }
 
 func (d *DCap) Capture(x, y, width, height int) error {
-	if d.Img == nil {
-		d.Img = image.NewRGBA(image.Rect(0, 0, width, height))
-	}
-	if d.Img.Bounds().Dx() != width || d.Img.Bounds().Dy() != height {
-		d.Img = image.NewRGBA(image.Rect(0, 0, width, height))
-	}
+	d.NewImage(x, y, width, height)
 	reply, err := xinerama.QueryScreens(d.xgbConn).Reply()
 	if err != nil {
 		return err
@@ -141,14 +136,64 @@ func (d *DCap) Capture(x, y, width, height int) error {
 	return nil
 }
 
-func (d *DCap) CaptureDisplay(displyIndex int) error {
-	if len(d.Displays)-1 < displyIndex {
+func (d *DCap) CaptureDisplay(displayIndex int) error {
+	if len(d.Displays)-1 < displayIndex {
 		return errors.New("display not found")
 	}
-	rect := d.Displays[displyIndex]
+	rect := d.Displays[displayIndex]
 	return d.Capture(rect.Min.X, rect.Min.Y, rect.Dx(), rect.Dy())
 }
 
-func (d *DCap) MouseMove(x, y int) error {
-	return nil
+// MouseMove move mouse to x,y
+func (cli *Client) MouseMove(x, y int) error {
+	return cli.cli.WarpPointer(uint16(x), uint16(y))
+}
+
+// ToggleMouse toggle mouse button event, https://www.x.org/releases/X11R7.7/doc/xextproto/xtest.html
+func (cli *Client) ToggleMouse(button MouseButton, down bool) error {
+	t := 4 // button down
+	if !down {
+		t = 5 // button up
+	}
+	return cli.cli.TestFakeInput(byte(t), byte(button)+1)
+}
+
+// ToggleKey toggle keyboard event
+func (cli *Client) ToggleKey(key string, down bool) error {
+	code := checkKeycodes(key)
+	if code == 0 {
+		return fmt.Errorf("key not found: %s", key)
+	}
+	t := 2 // key down
+	if !down {
+		t = 3 // key up
+	}
+	n := cli.cli.KeysymToKeycode(code)
+	return cli.cli.TestFakeInput(byte(t), n)
+}
+
+// Scroll https://github.com/go-vgo/robotgo/blob/master/mouse/mouse_c.h#L313
+func (cli *Client) Scroll(x, y int) {
+	run := func(dir byte, cnt int) {
+		for i := 0; i < cnt; i++ {
+			// https://gitlab.freedesktop.org/xorg/lib/libxtst/-/blob/master/src/XTest.c#L181
+			// transform press to 4 and up to 5
+			cli.cli.TestFakeInput(4, dir)
+			cli.cli.TestFakeInput(5, dir)
+		}
+	}
+	if x != 0 {
+		dir := 6 // up
+		if x < 0 {
+			dir = 7 // down
+		}
+		run(byte(dir), int(math.Abs(float64(x))))
+	}
+	if y != 0 {
+		dir := 4 // up
+		if y < 0 {
+			dir = 5 // down
+		}
+		run(byte(dir), int(math.Abs(float64(y))))
+	}
 }

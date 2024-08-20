@@ -1,6 +1,6 @@
 package dcap
 
-import "github.com/diiyw/dcap/keycode"
+import "github.com/diiyw/dcap/internal/keycode"
 
 // https://github.com/go-vgo/robotgo/blob/master/key/goKey.h#L142
 func checkKeycodes(key string) int {
