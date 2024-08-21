@@ -1,4 +1,4 @@
-package rdesktop
+package dcap
 
 /*
 #cgo LDFLAGS: -framework CoreGraphics -framework CoreFoundation -framework AppKit
@@ -10,61 +10,119 @@ CGEventRef createWheelEvent(int x, int y) {
 
 void get_cursor_size(int *width, int *height);
 void cursor_copy(unsigned char* pixels, int width, int height);
-void screenshot(unsigned char *pixels, int width, int height, bool show_cursor);
 */
 import "C"
 
 import (
+	"errors"
 	"fmt"
+	"github.com/diiyw/dcap/internal/mac"
 	"image"
 	"time"
 	"unsafe"
 )
 
 type DCap struct {
-	id        C.CGDirectDisplayID
-	ctrlDown  bool
-	altDown   bool
-	shiftDown bool
-	cmdDown   bool
+	Img        *image.RGBA
+	Displays   []image.Rectangle
+	displayIds []C.CGDirectDisplayID
+	ctrlDown   bool
+	altDown    bool
+	shiftDown  bool
+	cmdDown    bool
 }
 
-func (cli *osBase) init() error {
-	cli.id = getDisplayID()
-	return nil
-}
-
-// Close close client
-func (cli *osBase) Close() {
-	C.CGDisplayRelease(cli.id)
-}
-
-func getDisplayID() C.CGDirectDisplayID {
-	var id C.CGDirectDisplayID
-	if C.CGGetActiveDisplayList(C.uint32_t(1), (*C.CGDirectDisplayID)(unsafe.Pointer(&id)), nil) != C.kCGErrorSuccess {
-		return 0
+// NewDCap create new dcap
+func NewDCap() (*DCap, error) {
+	var d = &DCap{}
+	num := mac.NumActiveDisplays()
+	if num == 0 {
+		return nil, fmt.Errorf("can not get active displays")
 	}
-	return id
+	d.Displays = make([]image.Rectangle, num)
+	for i := 0; i < num; i++ {
+		d.Displays[i] = mac.GetDisplayBounds(i)
+	}
+	d.displayIds = mac.ActiveDisplayList()
+	return d, nil
 }
 
-func (cli *osBase) Size() (image.Point, error) {
-	display := C.CGDisplayCreateImage(cli.id)
-	defer C.CFRelease(C.CFTypeRef(display))
-	width := C.CGImageGetWidth(display)
-	height := C.CGImageGetHeight(display)
-	return image.Point{
-		X: int(width),
-		Y: int(height),
-	}, nil
-}
+func (d *DCap) Capture(x, y, width, height int) (*image.RGBA, error) {
+	if width <= 0 || height <= 0 {
+		return nil, errors.New("width or height should be > 0")
+	}
+	d.NewImage(x, y, width, height)
 
-func (d *DCap) screenshot(img *image.RGBA) error {
-	C.screenshot((*C.uchar)(unsafe.Pointer(&img.Pix[0])), C.int(img.Rect.Dx()), C.int(img.Rect.Dy()), C.bool(cli.showCursor))
-	return nil
+	// cg: CoreGraphics coordinate (origin: lower-left corner of primary display, x-axis: rightward, y-axis: upward)
+	// win: Windows coordinate (origin: upper-left corner of primary display, x-axis: rightward, y-axis: downward)
+	// di: Display local coordinate (origin: upper-left corner of the display, x-axis: rightward, y-axis: downward)
+
+	cgMainDisplayBounds := d.Displays[0]
+
+	winBottomLeft := C.CGPointMake(C.CGFloat(x), C.CGFloat(y+height))
+	cgBottomLeft := mac.GetCoreGraphicsCoordinateFromWindowsCoordinate(winBottomLeft, cgMainDisplayBounds)
+	cgCaptureBounds := C.CGRectMake(cgBottomLeft.x, cgBottomLeft.y, C.CGFloat(width), C.CGFloat(height))
+
+	ctx := mac.CreateBitmapContext(width, height, (*C.uint32_t)(unsafe.Pointer(&d.Img.Pix[0])), d.Img.Stride)
+	if ctx == 0 {
+		return nil, errors.New("cannot create bitmap context")
+	}
+
+	colorSpace := mac.CreateColorspace()
+	if colorSpace == 0 {
+		return nil, errors.New("cannot create colorspace")
+	}
+	defer C.CGColorSpaceRelease(colorSpace)
+
+	for _, id := range d.displayIds {
+		cgBounds := mac.GetCoreGraphicsCoordinateOfDisplay(id)
+		cgIntersect := C.CGRectIntersection(cgBounds, cgCaptureBounds)
+		if C.CGRectIsNull(cgIntersect) {
+			continue
+		}
+		if cgIntersect.size.width <= 0 || cgIntersect.size.height <= 0 {
+			continue
+		}
+
+		// CGDisplayCreateImageForRect potentially fail in case width/height is odd number.
+		if int(cgIntersect.size.width)%2 != 0 {
+			cgIntersect.size.width = C.CGFloat(int(cgIntersect.size.width) + 1)
+		}
+		if int(cgIntersect.size.height)%2 != 0 {
+			cgIntersect.size.height = C.CGFloat(int(cgIntersect.size.height) + 1)
+		}
+
+		diIntersectDisplayLocal := C.CGRectMake(cgIntersect.origin.x-cgBounds.origin.x,
+			cgBounds.origin.y+cgBounds.size.height-(cgIntersect.origin.y+cgIntersect.size.height),
+			cgIntersect.size.width, cgIntersect.size.height)
+
+		im := C.capture(id, diIntersectDisplayLocal, colorSpace)
+		if unsafe.Pointer(im) == nil {
+			return nil, errors.New("cannot capture display")
+		}
+		defer C.CGImageRelease(im)
+
+		cgDrawRect := C.CGRectMake(cgIntersect.origin.x-cgCaptureBounds.origin.x, cgIntersect.origin.y-cgCaptureBounds.origin.y,
+			cgIntersect.size.width, cgIntersect.size.height)
+		C.CGContextDrawImage(ctx, cgDrawRect, im)
+	}
+
+	i := 0
+	for iy := 0; iy < height; iy++ {
+		j := i
+		for ix := 0; ix < width; ix++ {
+			// ARGB => RGBA, and set A to 255
+			d.Img.Pix[j], d.Img.Pix[j+1], d.Img.Pix[j+2], d.Img.Pix[j+3] = d.Img.Pix[j+1], d.Img.Pix[j+2], d.Img.Pix[j+3], 255
+			j += 4
+		}
+		i += d.Img.Stride
+	}
+
+	return d.Img, nil
 }
 
 // GetCursor get cursor image
-func (cli *osBase) GetCursor() (*image.RGBA, error) {
+func (d *DCap) GetCursor() (*image.RGBA, error) {
 	var width, height C.int
 	C.get_cursor_size(&width, &height)
 	if width == 0 || height == 0 {
@@ -76,9 +134,12 @@ func (cli *osBase) GetCursor() (*image.RGBA, error) {
 }
 
 // MouseMove move mouse to x,y
-func (cli *osBase) MouseMove(x, y int) error {
+func (d *DCap) MouseMove(displayId, x, y int) error {
+	if len(d.displayIds) < displayId {
+		return fmt.Errorf("display not found")
+	}
 	pt := C.CGPointMake(C.double(x), C.double(y))
-	err := C.CGDisplayMoveCursorToPoint(cli.id, pt)
+	err := C.CGDisplayMoveCursorToPoint(d.displayIds[displayId], pt)
 	if err != 0 {
 		return fmt.Errorf("can not move: %d", err)
 	}
@@ -140,16 +201,16 @@ func (d *DCap) ToggleKey(key string, down bool) error {
 	}
 
 	flag := 0
-	if cli.ctrlDown {
+	if d.ctrlDown {
 		flag |= C.kCGEventFlagMaskControl
 	}
-	if cli.altDown {
+	if d.altDown {
 		flag |= C.kCGEventFlagMaskAlternate
 	}
-	if cli.cmdDown {
+	if d.cmdDown {
 		flag |= C.kCGEventFlagMaskCommand
 	}
-	if cli.shiftDown {
+	if d.shiftDown {
 		flag |= C.kCGEventFlagMaskShift
 	}
 	if flag != 0 {
@@ -160,13 +221,13 @@ func (d *DCap) ToggleKey(key string, down bool) error {
 
 	switch key {
 	case "cmd":
-		cli.cmdDown = down
+		d.cmdDown = down
 	case "alt":
-		cli.altDown = down
+		d.altDown = down
 	case "control":
-		cli.ctrlDown = down
+		d.ctrlDown = down
 	case "shift":
-		cli.shiftDown = down
+		d.shiftDown = down
 	}
 
 	time.Sleep(0)

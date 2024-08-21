@@ -1,9 +1,8 @@
 package keycode
 
 import (
+	"github.com/diiyw/dcap/internal/windef"
 	"syscall"
-
-	"github.com/lwch/rdesktop/windef"
 )
 
 // Maps https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
