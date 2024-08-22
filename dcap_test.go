@@ -55,3 +55,16 @@ func TestClient_ToggleKey(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestClient_ToggleMouse(t *testing.T) {
+	d, err := NewDCap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = d.ToggleMouse(MouseRight, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = d.ToggleMouse(MouseRight, false); err != nil {
+		t.Fatal(err)
+	}
+}
