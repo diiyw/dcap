@@ -48,10 +48,10 @@ func TestClient_ToggleKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = d.ToggleKey("cmd", true); err != nil {
+	if err = d.ToggleKey("esc", true); err != nil {
 		t.Fatal(err)
 	}
-	if err = d.ToggleKey("cmd", false); err != nil {
+	if err = d.ToggleKey("esc", false); err != nil {
 		t.Fatal(err)
 	}
 }

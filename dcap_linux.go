@@ -1,15 +1,17 @@
 package dcap
 
 import (
-	"errors"
+	"fmt"
 	"image"
 	"image/color"
+	"math"
 
 	"github.com/gen2brain/shm"
 	"github.com/jezek/xgb"
 	mshm "github.com/jezek/xgb/shm"
 	"github.com/jezek/xgb/xinerama"
 	"github.com/jezek/xgb/xproto"
+	"github.com/jezek/xgb/xtest"
 )
 
 type DCap struct {
@@ -27,6 +29,9 @@ func NewDCap() (*DCap, error) {
 		return nil, err
 	}
 	if err = xinerama.Init(c); err != nil {
+		return nil, err
+	}
+	if err = xtest.Init(c); err != nil {
 		return nil, err
 	}
 	reply, err := xinerama.QueryScreens(c).Reply()
@@ -136,64 +141,66 @@ func (d *DCap) Capture(x, y, width, height int) error {
 	return nil
 }
 
-func (d *DCap) CaptureDisplay(displayIndex int) error {
-	if len(d.Displays)-1 < displayIndex {
-		return errors.New("display not found")
-	}
-	rect := d.Displays[displayIndex]
-	return d.Capture(rect.Min.X, rect.Min.Y, rect.Dx(), rect.Dy())
-}
-
 // MouseMove move mouse to x,y
-func (cli *Client) MouseMove(x, y int) error {
-	return cli.cli.WarpPointer(uint16(x), uint16(y))
+func (d *DCap) MouseMove(x, y int) error {
+	cookie := xproto.WarpPointerChecked(d.xgbConn, xproto.WindowNone, d.defaultScreen.Root, 0, 0, 0, 0, int16(x), int16(y))
+	if err := cookie.Check(); err != nil {
+		return err
+	}
+	d.xgbConn.Sync()
+	return nil
 }
 
 // ToggleMouse toggle mouse button event, https://www.x.org/releases/X11R7.7/doc/xextproto/xtest.html
-func (cli *Client) ToggleMouse(button MouseButton, down bool) error {
-	t := 4 // button down
+func (d *DCap) ToggleMouse(button MouseButton, down bool) error {
+	var typ byte = xproto.ButtonPress
 	if !down {
-		t = 5 // button up
+		typ = xproto.ButtonRelease
 	}
-	return cli.cli.TestFakeInput(byte(t), byte(button)+1)
+	// Simulate a left mouse button press event
+	cookie := xtest.FakeInputChecked(d.xgbConn, typ, byte(button)+1, 0, d.defaultScreen.Root, 0, 0, 0)
+	if err := cookie.Check(); err != nil {
+		return err
+	}
+	d.xgbConn.Sync()
+	return nil
 }
 
 // ToggleKey toggle keyboard event
-func (cli *Client) ToggleKey(key string, down bool) error {
-	code := checkKeycodes(key)
+func (d *DCap) ToggleKey(key string, down bool) error {
+	var code byte = byte(checkKeycodes(key))
 	if code == 0 {
 		return fmt.Errorf("key not found: %s", key)
 	}
-	t := 2 // key down
+	var eventType byte = xproto.KeyPress // key down
 	if !down {
-		t = 3 // key up
+		eventType = xproto.KeyRelease // key up
 	}
-	n := cli.cli.KeysymToKeycode(code)
-	return cli.cli.TestFakeInput(byte(t), n)
-}
 
-// Scroll https://github.com/go-vgo/robotgo/blob/master/mouse/mouse_c.h#L313
-func (cli *Client) Scroll(x, y int) {
-	run := func(dir byte, cnt int) {
-		for i := 0; i < cnt; i++ {
-			// https://gitlab.freedesktop.org/xorg/lib/libxtst/-/blob/master/src/XTest.c#L181
-			// transform press to 4 and up to 5
-			cli.cli.TestFakeInput(4, dir)
-			cli.cli.TestFakeInput(5, dir)
-		}
+	cookie := xtest.FakeInputChecked(d.xgbConn, eventType, code, 0, d.defaultScreen.Root, 0, 0, 0)
+	if err := cookie.Check(); err != nil {
+		return err
 	}
-	if x != 0 {
-		dir := 6 // up
-		if x < 0 {
-			dir = 7 // down
-		}
-		run(byte(dir), int(math.Abs(float64(x))))
+	return nil
+}
+func (d *DCap) Scroll(x, y int) {
+	var ydir byte = 4 /* Button 4 is up, 5 is down. */
+	var xdir byte = 6
+
+	if y < 0 {
+		ydir = 5
 	}
-	if y != 0 {
-		dir := 4 // up
-		if y < 0 {
-			dir = 5 // down
-		}
-		run(byte(dir), int(math.Abs(float64(y))))
+	if x < 0 {
+		xdir = 7
 	}
+
+	for xi := 0; xi < int(math.Abs(float64(x))); xi++ {
+		xtest.FakeInput(d.xgbConn, xdir, 1, 0, d.defaultScreen.Root, int16(x), int16(y), 0)
+		xtest.FakeInput(d.xgbConn, xdir, 0, 0, d.defaultScreen.Root, int16(x), int16(y), 0)
+	}
+	for yi := 0; yi < int(math.Abs(float64(y))); yi++ {
+		xtest.FakeInput(d.xgbConn, ydir, 1, 0, d.defaultScreen.Root, int16(x), int16(y), 0)
+		xtest.FakeInput(d.xgbConn, ydir, 0, 0, d.defaultScreen.Root, int16(x), int16(y), 0)
+	}
+	d.xgbConn.Sync()
 }
