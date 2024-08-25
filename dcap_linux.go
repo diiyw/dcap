@@ -15,7 +15,7 @@ import (
 )
 
 type DCap struct {
-	Img               *image.RGBA
+	im                *image.RGBA
 	Displays          []image.Rectangle
 	xgbConn           *xgb.Conn
 	useShm            bool
@@ -133,7 +133,7 @@ func (d *DCap) Capture(x, y, width, height int) error {
 				r := data[offset+2]
 				g := data[offset+1]
 				b := data[offset]
-				d.Img.SetRGBA(ix-(x+x0), iy-(y+y0), color.RGBA{r, g, b, 255})
+				d.im.SetRGBA(ix-(x+x0), iy-(y+y0), color.RGBA{r, g, b, 255})
 				offset += 4
 			}
 		}

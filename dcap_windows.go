@@ -16,7 +16,7 @@ import (
 )
 
 type DCap struct {
-	Img          *image.RGBA
+	im           *image.RGBA
 	Displays     []image.Rectangle
 	hdc          win.HDC
 	memoryDevice win.HDC
@@ -93,7 +93,7 @@ func (d *DCap) Capture(x, y, width, height int) error {
 			v2 := *(*uint8)(unsafe.Pointer(src + 2))
 
 			// BGRA => RGBA, and set A to 255
-			d.Img.Pix[i], d.Img.Pix[i+1], d.Img.Pix[i+2], d.Img.Pix[i+3] = v2, v1, v0, 255
+			d.im.Pix[i], d.im.Pix[i+1], d.im.Pix[i+2], d.im.Pix[i+3] = v2, v1, v0, 255
 
 			i += 4
 			src += 4

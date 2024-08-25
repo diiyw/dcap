@@ -23,7 +23,7 @@ import (
 )
 
 type DCap struct {
-	Img        *image.RGBA
+	im         *image.RGBA
 	Displays   []image.Rectangle
 	displayIds []C.CGDirectDisplayID
 	ctrlDown   bool
@@ -63,7 +63,7 @@ func (d *DCap) Capture(x, y, width, height int) (*image.RGBA, error) {
 	cgBottomLeft := mac.GetCoreGraphicsCoordinateFromWindowsCoordinate(winBottomLeft, cgMainDisplayBounds)
 	cgCaptureBounds := C.CGRectMake(cgBottomLeft.x, cgBottomLeft.y, C.CGFloat(width), C.CGFloat(height))
 
-	ctx := mac.CreateBitmapContext(width, height, (*C.uint32_t)(unsafe.Pointer(&d.Img.Pix[0])), d.Img.Stride)
+	ctx := mac.CreateBitmapContext(width, height, (*C.uint32_t)(unsafe.Pointer(&d.im.Pix[0])), d.im.Stride)
 	if ctx == 0 {
 		return nil, errors.New("cannot create bitmap context")
 	}
@@ -112,13 +112,13 @@ func (d *DCap) Capture(x, y, width, height int) (*image.RGBA, error) {
 		j := i
 		for ix := 0; ix < width; ix++ {
 			// ARGB => RGBA, and set A to 255
-			d.Img.Pix[j], d.Img.Pix[j+1], d.Img.Pix[j+2], d.Img.Pix[j+3] = d.Img.Pix[j+1], d.Img.Pix[j+2], d.Img.Pix[j+3], 255
+			d.im.Pix[j], d.im.Pix[j+1], d.im.Pix[j+2], d.im.Pix[j+3] = d.im.Pix[j+1], d.im.Pix[j+2], d.im.Pix[j+3], 255
 			j += 4
 		}
-		i += d.Img.Stride
+		i += d.im.Stride
 	}
 
-	return d.Img, nil
+	return d.im, nil
 }
 
 // GetCursor get cursor image

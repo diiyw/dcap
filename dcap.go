@@ -9,11 +9,11 @@ import (
 
 // NewImage create new image
 func (d *DCap) NewImage(x, y, width, height int) {
-	if d.Img == nil {
-		d.Img = image.NewRGBA(image.Rect(0, 0, width, height))
+	if d.im == nil {
+		d.im = image.NewRGBA(image.Rect(0, 0, width, height))
 	}
-	if d.Img.Bounds().Dx() != width || d.Img.Bounds().Dy() != height {
-		d.Img = image.NewRGBA(image.Rect(0, 0, width, height))
+	if d.im.Bounds().Dx() != width || d.im.Bounds().Dy() != height {
+		d.im = image.NewRGBA(image.Rect(0, 0, width, height))
 	}
 }
 
@@ -33,4 +33,16 @@ func (d *DCap) ClipboardSet(text string) error {
 // ClipboardGet get text from clipboard
 func (d *DCap) ClipboardGet() (string, error) {
 	return clipboard.Get()
+}
+
+// ImageNoCopy return image.RGBA without copy
+func (d *DCap) ImageNoCopy() *image.RGBA {
+	return d.im
+}
+
+// Image return image.RGBA with copy
+func (d *DCap) Image() *image.RGBA {
+	im := image.NewRGBA(d.im.Bounds())
+	copy(im.Pix, d.im.Pix)
+	return im
 }
