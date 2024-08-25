@@ -20,6 +20,7 @@ type DCap struct {
 	Displays     []image.Rectangle
 	hdc          win.HDC
 	memoryDevice win.HDC
+	bitmap       win.HBITMAP
 }
 
 func NewDCap() (*DCap, error) {
@@ -42,15 +43,17 @@ func NewDCap() (*DCap, error) {
 func (d *DCap) Close() {
 	win.ReleaseDC(win.HWND(0), d.hdc)
 	win.DeleteDC(d.memoryDevice)
+	win.DeleteObject(win.HGDIOBJ(d.bitmap))
 }
 
 func (d *DCap) Capture(x, y, width, height int) error {
 	d.NewImage(x, y, width, height)
-	bitmap := win.CreateCompatibleBitmap(d.hdc, int32(width), int32(height))
-	if bitmap == 0 {
-		return errors.New("CreateCompatibleBitmap failed")
+	if d.bitmap == 0 {
+		d.bitmap = win.CreateCompatibleBitmap(d.hdc, int32(width), int32(height))
+		if d.bitmap == 0 {
+			return errors.New("CreateCompatibleBitmap failed")
+		}
 	}
-	defer win.DeleteObject(win.HGDIOBJ(bitmap))
 
 	var header win.BITMAPINFOHEADER
 	header.BiSize = uint32(unsafe.Sizeof(header))
@@ -70,7 +73,7 @@ func (d *DCap) Capture(x, y, width, height int) error {
 	memPtr := win.GlobalLock(hMem)
 	defer win.GlobalUnlock(hMem)
 
-	old := win.SelectObject(d.memoryDevice, win.HGDIOBJ(bitmap))
+	old := win.SelectObject(d.memoryDevice, win.HGDIOBJ(d.bitmap))
 	if old == 0 {
 		return errors.New("SelectObject failed")
 	}
@@ -80,7 +83,7 @@ func (d *DCap) Capture(x, y, width, height int) error {
 		return errors.New("BitBlt failed")
 	}
 
-	if win.GetDIBits(d.hdc, bitmap, 0, uint32(height), (*uint8)(memPtr), (*win.BITMAPINFO)(unsafe.Pointer(&header)), win.DIB_RGB_COLORS) == 0 {
+	if win.GetDIBits(d.hdc, d.bitmap, 0, uint32(height), (*uint8)(memPtr), (*win.BITMAPINFO)(unsafe.Pointer(&header)), win.DIB_RGB_COLORS) == 0 {
 		return errors.New("GetDIBits failed")
 	}
 

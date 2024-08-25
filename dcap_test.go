@@ -1,6 +1,7 @@
 package dcap
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 )
@@ -15,6 +16,17 @@ func TestDCap(t *testing.T) {
 	}
 	if err = d.CaptureDisplay(0); err != nil {
 		t.Fatal(err)
+	}
+	im := d.Image()
+	if err = d.CaptureDisplay(0); err != nil {
+		t.Fatal(err)
+	}
+	im2 := d.Image()
+	if im.Bounds().Dx() != im2.Bounds().Dx() || im.Bounds().Dy() != im2.Bounds().Dy() {
+		t.Fatal("image size not equal")
+	}
+	if bytes.Equal(im.Pix, im2.Pix) {
+		t.Fatal("image data equal")
 	}
 }
 
