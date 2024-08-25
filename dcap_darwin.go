@@ -136,7 +136,7 @@ func (d *DCap) GetCursor() (*image.RGBA, error) {
 // MouseMove move mouse to x,y
 func (d *DCap) MouseMove(displayId, x, y int) error {
 	if len(d.displayIds) < displayId {
-		return fmt.Errorf("display not found")
+		return fmt.Errorf("index %d  out of range", displayId)
 	}
 	pt := C.CGPointMake(C.double(x), C.double(y))
 	err := C.CGDisplayMoveCursorToPoint(d.displayIds[displayId], pt)

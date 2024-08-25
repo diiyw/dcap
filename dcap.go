@@ -2,7 +2,7 @@ package dcap
 
 import "C"
 import (
-	"errors"
+	"fmt"
 	"github.com/diiyw/dcap/internal/clipboard"
 	"image"
 )
@@ -19,7 +19,7 @@ func (d *DCap) NewImage(x, y, width, height int) {
 
 func (d *DCap) CaptureDisplay(displayIndex int) error {
 	if len(d.Displays)-1 < displayIndex {
-		return errors.New("display not found")
+		return fmt.Errorf("index %d  out of range", displayIndex)
 	}
 	rect := d.Displays[displayIndex]
 	return d.Capture(rect.Min.X, rect.Min.Y, rect.Dx(), rect.Dy())
