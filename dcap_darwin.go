@@ -37,14 +37,17 @@ import (
 )
 
 type DCap struct {
-	im             *image.RGBA
-	Displays       []image.Rectangle
-	displayIds     []C.CGDirectDisplayID
-	ctrlDown       bool
-	altDown        bool
-	shiftDown      bool
-	cmdDown        bool
-	currentDisplay int
+	im                  *image.RGBA
+	Displays            []image.Rectangle
+	displayIds          []C.CGDirectDisplayID
+	ctrlDown            bool
+	altDown             bool
+	shiftDown           bool
+	cmdDown             bool
+	currentDisplay      int
+	bitmapContext       C.CGContextRef
+	colorSpace          C.CGColorSpaceRef
+	cgMainDisplayBounds C.CGRect
 }
 
 // NewDCap create new dcap
@@ -59,7 +62,14 @@ func NewDCap() (*DCap, error) {
 		d.Displays[i] = getDisplayBounds(i)
 	}
 	d.displayIds = activeDisplayList()
+	d.cgMainDisplayBounds = C.CGRectMake(C.CGFloat(d.Displays[0].Min.X), C.CGFloat(d.Displays[0].Min.Y),
+		C.CGFloat(d.Displays[0].Dx()), C.CGFloat(d.Displays[0].Dy()))
 	return d, nil
+}
+
+func (d *DCap) Close() {
+	C.CGColorSpaceRelease(d.colorSpace)
+	return
 }
 
 func (d *DCap) Capture(x, y, width, height int) error {
@@ -68,27 +78,22 @@ func (d *DCap) Capture(x, y, width, height int) error {
 	}
 	d.NewImage(x, y, width, height)
 
-	// cg: CoreGraphics coordinate (origin: lower-left corner of primary display, x-axis: rightward, y-axis: upward)
-	// win: Windows coordinate (origin: upper-left corner of primary display, x-axis: rightward, y-axis: downward)
-	// di: Display local coordinate (origin: upper-left corner of the display, x-axis: rightward, y-axis: downward)
-
-	cgMainDisplayBounds := C.CGRectMake(C.CGFloat(d.Displays[0].Min.X), C.CGFloat(d.Displays[0].Min.Y),
-		C.CGFloat(d.Displays[0].Dx()), C.CGFloat(d.Displays[0].Dy()))
-
 	winBottomLeft := C.CGPointMake(C.CGFloat(x), C.CGFloat(y+height))
-	cgBottomLeft := getCoreGraphicsCoordinateFromWindowsCoordinate(winBottomLeft, cgMainDisplayBounds)
+	cgBottomLeft := getCoreGraphicsCoordinateFromWindowsCoordinate(winBottomLeft, d.cgMainDisplayBounds)
 	cgCaptureBounds := C.CGRectMake(cgBottomLeft.x, cgBottomLeft.y, C.CGFloat(width), C.CGFloat(height))
 
-	ctx := createBitmapContext(width, height, (*C.uint32_t)(unsafe.Pointer(&d.im.Pix[0])), d.im.Stride)
-	if ctx == 0 {
-		return errors.New("cannot create bitmap context")
+	if d.bitmapContext == 0 {
+		d.bitmapContext = createBitmapContext(width, height, (*C.uint32_t)(unsafe.Pointer(&d.im.Pix[0])), d.im.Stride)
+		if d.bitmapContext == 0 {
+			return errors.New("cannot create bitmap context")
+		}
 	}
-
-	colorSpace := createColorspace()
-	if colorSpace == 0 {
-		return errors.New("cannot create colorspace")
+	if d.colorSpace == 0 {
+		d.colorSpace = createColorspace()
+		if d.colorSpace == 0 {
+			return errors.New("cannot create colorspace")
+		}
 	}
-	defer C.CGColorSpaceRelease(colorSpace)
 
 	for _, id := range d.displayIds {
 		cgBounds := getCoreGraphicsCoordinateOfDisplay(id)
@@ -117,7 +122,7 @@ func (d *DCap) Capture(x, y, width, height int) error {
 		}
 		defer C.CompatCGImageRelease(captured)
 
-		image := C.CompatCGImageCreateCopyWithColorSpace(captured, colorSpace)
+		image := C.CompatCGImageCreateCopyWithColorSpace(captured, d.colorSpace)
 		if image == nil {
 			return errors.New("failed copying captured image")
 		}
@@ -125,7 +130,7 @@ func (d *DCap) Capture(x, y, width, height int) error {
 
 		cgDrawRect := C.CGRectMake(cgIntersect.origin.x-cgCaptureBounds.origin.x, cgIntersect.origin.y-cgCaptureBounds.origin.y,
 			cgIntersect.size.width, cgIntersect.size.height)
-		C.CompatCGContextDrawImage(ctx, cgDrawRect, image)
+		C.CompatCGContextDrawImage(d.bitmapContext, cgDrawRect, image)
 	}
 
 	i := 0
@@ -134,10 +139,8 @@ func (d *DCap) Capture(x, y, width, height int) error {
 		for ix := 0; ix < width; ix++ {
 			// ARGB => RGBA, and set A to 255
 			d.im.Pix[j], d.im.Pix[j+1], d.im.Pix[j+2], d.im.Pix[j+3] = d.im.Pix[j+1], d.im.Pix[j+2], d.im.Pix[j+3], 255
-			d.im.Pix[j], d.im.Pix[j+1], d.im.Pix[j+2], d.im.Pix[j+3] = d.im.Pix[j+1], d.im.Pix[j+2], d.im.Pix[j+3], 255
 			j += 4
 		}
-		i += d.im.Stride
 		i += d.im.Stride
 	}
 
@@ -145,10 +148,7 @@ func (d *DCap) Capture(x, y, width, height int) error {
 }
 
 // MouseMove move mouse to x,y
-func (d *DCap) MouseMove(displayId, x, y int) error {
-	if len(d.displayIds) < displayId {
-		return fmt.Errorf("index %d out of range", displayId)
-	}
+func (d *DCap) MouseMove(x, y int) error {
 	pt := C.CGPointMake(C.double(x), C.double(y))
 	err := C.CGDisplayMoveCursorToPoint(C.uint(d.currentDisplay), pt)
 	if err != 0 {
