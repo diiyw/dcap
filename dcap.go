@@ -3,8 +3,9 @@ package dcap
 import "C"
 import (
 	"fmt"
-	"github.com/diiyw/dcap/internal/clipboard"
 	"image"
+
+	"github.com/diiyw/dcap/internal/clipboard"
 )
 
 // NewImage create new image

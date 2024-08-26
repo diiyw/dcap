@@ -64,6 +64,11 @@ func NewDCap() (*DCap, error) {
 	return d, nil
 }
 
+// Close close connection
+func (d *DCap) Close() {
+	d.xgbConn.Close()
+}
+
 func (d *DCap) Capture(x, y, width, height int) error {
 	d.NewImage(x, y, width, height)
 	reply, err := xinerama.QueryScreens(d.xgbConn).Reply()

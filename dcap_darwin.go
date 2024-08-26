@@ -8,48 +8,63 @@ CGEventRef createWheelEvent(int x, int y) {
 	return CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 2, y, x);
 }
 
-void get_cursor_size(int *width, int *height);
-void cursor_copy(unsigned char* pixels, int width, int height);
+// void get_cursor_size(int *width, int *height);
+// void cursor_copy(unsigned char* pixels, int width, int height);
+void* CompatCGDisplayCreateImageForRect(CGDirectDisplayID display, CGRect rect) {
+	return CGDisplayCreateImageForRect(display, rect);
+}
+
+void CompatCGImageRelease(void* image) {
+	CGImageRelease(image);
+}
+
+void* CompatCGImageCreateCopyWithColorSpace(void* image, CGColorSpaceRef space) {
+	return CGImageCreateCopyWithColorSpace((CGImageRef)image, space);
+}
+
+void CompatCGContextDrawImage(CGContextRef c, CGRect rect, void* image) {
+	CGContextDrawImage(c, rect, (CGImageRef)image);
+}
 */
 import "C"
 
 import (
 	"errors"
 	"fmt"
-	"github.com/diiyw/dcap/internal/mac"
 	"image"
 	"time"
 	"unsafe"
 )
 
 type DCap struct {
-	im         *image.RGBA
-	Displays   []image.Rectangle
-	displayIds []C.CGDirectDisplayID
-	ctrlDown   bool
-	altDown    bool
-	shiftDown  bool
-	cmdDown    bool
+	im             *image.RGBA
+	Displays       []image.Rectangle
+	displayIds     []C.CGDirectDisplayID
+	ctrlDown       bool
+	altDown        bool
+	shiftDown      bool
+	cmdDown        bool
+	currentDisplay int
 }
 
 // NewDCap create new dcap
 func NewDCap() (*DCap, error) {
 	var d = &DCap{}
-	num := mac.NumActiveDisplays()
+	num := numActiveDisplays()
 	if num == 0 {
 		return nil, fmt.Errorf("can not get active displays")
 	}
 	d.Displays = make([]image.Rectangle, num)
 	for i := 0; i < num; i++ {
-		d.Displays[i] = mac.GetDisplayBounds(i)
+		d.Displays[i] = getDisplayBounds(i)
 	}
-	d.displayIds = mac.ActiveDisplayList()
+	d.displayIds = activeDisplayList()
 	return d, nil
 }
 
-func (d *DCap) Capture(x, y, width, height int) (*image.RGBA, error) {
+func (d *DCap) Capture(x, y, width, height int) error {
 	if width <= 0 || height <= 0 {
-		return nil, errors.New("width or height should be > 0")
+		return errors.New("width or height should be > 0")
 	}
 	d.NewImage(x, y, width, height)
 
@@ -57,25 +72,26 @@ func (d *DCap) Capture(x, y, width, height int) (*image.RGBA, error) {
 	// win: Windows coordinate (origin: upper-left corner of primary display, x-axis: rightward, y-axis: downward)
 	// di: Display local coordinate (origin: upper-left corner of the display, x-axis: rightward, y-axis: downward)
 
-	cgMainDisplayBounds := d.Displays[0]
+	cgMainDisplayBounds := C.CGRectMake(C.CGFloat(d.Displays[0].Min.X), C.CGFloat(d.Displays[0].Min.Y),
+		C.CGFloat(d.Displays[0].Dx()), C.CGFloat(d.Displays[0].Dy()))
 
 	winBottomLeft := C.CGPointMake(C.CGFloat(x), C.CGFloat(y+height))
-	cgBottomLeft := mac.GetCoreGraphicsCoordinateFromWindowsCoordinate(winBottomLeft, cgMainDisplayBounds)
+	cgBottomLeft := getCoreGraphicsCoordinateFromWindowsCoordinate(winBottomLeft, cgMainDisplayBounds)
 	cgCaptureBounds := C.CGRectMake(cgBottomLeft.x, cgBottomLeft.y, C.CGFloat(width), C.CGFloat(height))
 
-	ctx := mac.CreateBitmapContext(width, height, (*C.uint32_t)(unsafe.Pointer(&d.im.Pix[0])), d.im.Stride)
+	ctx := createBitmapContext(width, height, (*C.uint32_t)(unsafe.Pointer(&d.im.Pix[0])), d.im.Stride)
 	if ctx == 0 {
-		return nil, errors.New("cannot create bitmap context")
+		return errors.New("cannot create bitmap context")
 	}
 
-	colorSpace := mac.CreateColorspace()
+	colorSpace := createColorspace()
 	if colorSpace == 0 {
-		return nil, errors.New("cannot create colorspace")
+		return errors.New("cannot create colorspace")
 	}
 	defer C.CGColorSpaceRelease(colorSpace)
 
 	for _, id := range d.displayIds {
-		cgBounds := mac.GetCoreGraphicsCoordinateOfDisplay(id)
+		cgBounds := getCoreGraphicsCoordinateOfDisplay(id)
 		cgIntersect := C.CGRectIntersection(cgBounds, cgCaptureBounds)
 		if C.CGRectIsNull(cgIntersect) {
 			continue
@@ -95,16 +111,21 @@ func (d *DCap) Capture(x, y, width, height int) (*image.RGBA, error) {
 		diIntersectDisplayLocal := C.CGRectMake(cgIntersect.origin.x-cgBounds.origin.x,
 			cgBounds.origin.y+cgBounds.size.height-(cgIntersect.origin.y+cgIntersect.size.height),
 			cgIntersect.size.width, cgIntersect.size.height)
-
-		im := C.capture(id, diIntersectDisplayLocal, colorSpace)
-		if unsafe.Pointer(im) == nil {
-			return nil, errors.New("cannot capture display")
+		captured := C.CompatCGDisplayCreateImageForRect(id, diIntersectDisplayLocal)
+		if captured == nil {
+			return errors.New("cannot capture display")
 		}
-		defer C.CGImageRelease(im)
+		defer C.CompatCGImageRelease(captured)
+
+		image := C.CompatCGImageCreateCopyWithColorSpace(captured, colorSpace)
+		if image == nil {
+			return errors.New("failed copying captured image")
+		}
+		defer C.CompatCGImageRelease(image)
 
 		cgDrawRect := C.CGRectMake(cgIntersect.origin.x-cgCaptureBounds.origin.x, cgIntersect.origin.y-cgCaptureBounds.origin.y,
 			cgIntersect.size.width, cgIntersect.size.height)
-		C.CGContextDrawImage(ctx, cgDrawRect, im)
+		C.CompatCGContextDrawImage(ctx, cgDrawRect, image)
 	}
 
 	i := 0
@@ -113,33 +134,23 @@ func (d *DCap) Capture(x, y, width, height int) (*image.RGBA, error) {
 		for ix := 0; ix < width; ix++ {
 			// ARGB => RGBA, and set A to 255
 			d.im.Pix[j], d.im.Pix[j+1], d.im.Pix[j+2], d.im.Pix[j+3] = d.im.Pix[j+1], d.im.Pix[j+2], d.im.Pix[j+3], 255
+			d.im.Pix[j], d.im.Pix[j+1], d.im.Pix[j+2], d.im.Pix[j+3] = d.im.Pix[j+1], d.im.Pix[j+2], d.im.Pix[j+3], 255
 			j += 4
 		}
 		i += d.im.Stride
+		i += d.im.Stride
 	}
 
-	return d.im, nil
-}
-
-// GetCursor get cursor image
-func (d *DCap) GetCursor() (*image.RGBA, error) {
-	var width, height C.int
-	C.get_cursor_size(&width, &height)
-	if width == 0 || height == 0 {
-		return nil, fmt.Errorf("can not get cursor size")
-	}
-	img := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
-	C.cursor_copy((*C.uchar)(unsafe.Pointer(&img.Pix[0])), width, height)
-	return img, nil
+	return nil
 }
 
 // MouseMove move mouse to x,y
 func (d *DCap) MouseMove(displayId, x, y int) error {
 	if len(d.displayIds) < displayId {
-		return fmt.Errorf("index %d  out of range", displayId)
+		return fmt.Errorf("index %d out of range", displayId)
 	}
 	pt := C.CGPointMake(C.double(x), C.double(y))
-	err := C.CGDisplayMoveCursorToPoint(d.displayIds[displayId], pt)
+	err := C.CGDisplayMoveCursorToPoint(C.uint(d.currentDisplay), pt)
 	if err != 0 {
 		return fmt.Errorf("can not move: %d", err)
 	}

@@ -55,20 +55,20 @@ func TestMouseMove(t *testing.T) {
 	}
 }
 
-func TestClient_ToggleKey(t *testing.T) {
+func TestToggleKey(t *testing.T) {
 	d, err := NewDCap()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = d.ToggleKey("esc", true); err != nil {
+	if err = d.ToggleKey("a", true); err != nil {
 		t.Fatal(err)
 	}
-	if err = d.ToggleKey("esc", false); err != nil {
+	if err = d.ToggleKey("a", false); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestClient_ToggleMouse(t *testing.T) {
+func TestToggleMouse(t *testing.T) {
 	d, err := NewDCap()
 	if err != nil {
 		t.Fatal(err)
